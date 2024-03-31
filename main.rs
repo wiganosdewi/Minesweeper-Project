@@ -1,6 +1,6 @@
 use std::io;
 use std::process;
-//use std::collections::HashMap;
+use std::collections::HashMap;
 use rand::Rng;
 
 const WIDTH: usize = 8;
@@ -18,10 +18,12 @@ const FLAGINDEX: usize = 2;
 fn main() {
     // Make the gameplay loop
     let mut board = generate_board();
+
+    let mut cell_mines: HashMap<String, u32> = HashMap::new();
     loop {
         let mut player_choice = String::new();
 
-        render_board(&board);
+        render_board(&board, &cell_mines);
         println!("What do you want to do?");
         println!("[c]lear  [f]lag  [q]uit");        
 
@@ -37,8 +39,24 @@ fn main() {
 
                 let (number, letter) = capture_user_input();
 
-                board[number - 1][letter][DISCOVERINDEX] = true;
-                read_board(&board, letter, number - 1)
+                if board[number - 1][letter][DISCOVERINDEX] == true {
+                    clear_around(&mut board, number - 1, letter);
+
+                    for v_offset in -1..2 {
+                        for h_offset in -1..2 {
+                            let new_row = (number - 1) as isize + v_offset;
+                            let new_col = letter as isize + h_offset;
+
+                            if new_row >= 0 && new_row < HEIGHT as isize && 
+                            new_col >= 0 && new_col < WIDTH as isize {
+                                read_board(&mut board, new_row as usize, new_col as usize, &mut cell_mines);
+                            }
+                        }
+                    }
+                } else {
+                    board[number - 1][letter][DISCOVERINDEX] = true;
+                    read_board(&mut board, number - 1, letter, &mut cell_mines);
+                }
             }
 
             "f" => {
@@ -46,7 +64,9 @@ fn main() {
 
                 let (number, letter) = capture_user_input();
 
-                board[number - 1][letter][FLAGINDEX] = true;
+                if board[number -1][letter][DISCOVERINDEX] == false {
+                    board[number - 1][letter][FLAGINDEX] = !board[number - 1][letter][FLAGINDEX];
+                }
             }
 
             "q" => process::exit(0),
@@ -56,7 +76,7 @@ fn main() {
 }
 
 
-fn render_board(board: &[[[bool; 3]; WIDTH]; HEIGHT]) {
+fn render_board(board: &[[[bool; 3]; WIDTH]; HEIGHT], cell_mines: & HashMap<String, u32>) {
     let mut buffer = vec![String::new(); WIDTH];
     print!("  ");
 
@@ -77,7 +97,12 @@ fn render_board(board: &[[[bool; 3]; WIDTH]; HEIGHT]) {
                     false => buffer[collumn] = String::from("#"),
 
                     true => match board[row][collumn][MINEINDEX] {
-                        false => buffer[collumn] = near_mines(board, row, collumn),
+                        false => { 
+                            match cell_mines.get(&String::from(format!("board[{row}][{collumn}]"))) {
+                                Some(&display_number) => buffer[collumn] = display_number.to_string(),
+                                _ => process::exit(1),
+                            }
+                        },
                         true => buffer[collumn] = String::from("X"),
                     }
                 }
@@ -88,7 +113,7 @@ fn render_board(board: &[[[bool; 3]; WIDTH]; HEIGHT]) {
 }
 
 
-fn near_mines(board: &[[[bool; 3]; WIDTH]; HEIGHT], row: usize, collumn: usize) -> String {
+fn near_mines(board: &[[[bool; 3]; WIDTH]; HEIGHT], row: usize, collumn: usize) -> u32 {
     let mut near_mines: u32 = 0;
 
     for v_offset in -1..2 {
@@ -104,7 +129,6 @@ fn near_mines(board: &[[[bool; 3]; WIDTH]; HEIGHT], row: usize, collumn: usize) 
             }
         }
     }
-    let near_mines = near_mines.to_string();
     return near_mines;
 }
 
@@ -136,6 +160,7 @@ fn clear_around(board: &mut [[[bool; 3]; WIDTH]; HEIGHT], row: usize, collumn: u
 
             if new_row >= 0 && new_row < HEIGHT as isize && 
             new_col >= 0 && new_col < WIDTH as isize {
+
                 if board[new_row as usize][new_col as usize][FLAGINDEX] == false {
                     board[new_row as usize][new_col as usize][DISCOVERINDEX] = true;
                 }
@@ -168,6 +193,42 @@ fn capture_user_input() -> (usize, usize) {
 }
 
 
-fn read_board(board: &[[[bool; 3]; WIDTH]; HEIGHT], row: usize, collumn: usize) {
-    
+fn read_board(board: &mut [[[bool; 3]; WIDTH]; HEIGHT], row: usize, collumn: usize, cell_mines: &mut HashMap<String, u32>) {
+    if board[row][collumn][MINEINDEX] == true && 
+    board[row][collumn][DISCOVERINDEX] == true {
+        render_board(board, cell_mines);
+        println!("you stepped on a mine! you lost!");
+        process::exit(0);
+    } else {
+        let near_mines = near_mines(board, row, collumn);
+        cell_mines.insert(String::from(format!("board[{row}][{collumn}]")), near_mines);
+
+        if near_mines == 0 {
+            clear_zeroes(board, row, collumn, cell_mines);
+        }
+    }
+}
+
+
+fn clear_zeroes(board: &mut [[[bool; 3]; WIDTH]; HEIGHT], row: usize, collumn: usize, cell_mines: &mut HashMap<String, u32>) {
+    clear_around(board, row, collumn);
+
+    for v_offset in -1..2 {
+        for h_offset in -1..2 {
+            let new_row = row as isize + v_offset;
+            let new_col = collumn as isize + h_offset;
+
+            if new_row >= 0 && new_row < HEIGHT as isize && 
+            new_col >= 0 && new_col < WIDTH as isize {
+                if !cell_mines.contains_key(&String::from(format!("board[{new_row}][{new_col}]"))) {
+                    let near_mines = near_mines(board, new_row as usize, new_col as usize);
+                    cell_mines.insert(String::from(format!("board[{new_row}][{new_col}]")), near_mines);
+
+                    if near_mines == 0 {
+                        clear_zeroes(board, new_row as usize, new_col as usize, cell_mines);
+                    }
+                }
+            }
+        }
+    }
 }
