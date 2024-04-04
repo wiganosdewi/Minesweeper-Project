@@ -16,67 +16,74 @@ const FLAGINDEX: usize = 2;
 
 
 fn main() {
-    // Make the gameplay loop
-    let mut board = generate_board();
+    'outer: loop {
+        let mut board = generate_board();
+        let mut cell_mines: HashMap<String, u32> = HashMap::new();
+        let mut unflagged_mines: i32 = MINES as i32;
+        loop {
+            let mut player_choice = String::new();
 
-    let mut cell_mines: HashMap<String, u32> = HashMap::new();
-    loop {
-        let mut player_choice = String::new();
+            render_board(&board, &cell_mines, &unflagged_mines);
+            println!("What do you want to do?");
+            println!("[c]lear  [f]lag  [r]eset  [q]uit");        
 
-        render_board(&board, &cell_mines);
-        println!("What do you want to do?");
-        println!("[c]lear  [f]lag  [q]uit");        
+            io::stdin()
+                .read_line(&mut player_choice)
+                .expect("Failed to read line");
 
-        io::stdin()
-            .read_line(&mut player_choice)
-            .expect("Failed to read line");
+            let player_choice = player_choice.trim().to_string();
 
-        let player_choice = player_choice.trim().to_string();
+            match player_choice.as_str() {
+                "c" | "C" => {
+                    println!("which cell do you want to clear?");
 
-        match player_choice.as_str() {
-            "c" => {
-                println!("which cell do you want to clear?");
+                    let (number, letter) = capture_user_input();
 
-                let (number, letter) = capture_user_input();
+                    if board[number - 1][letter][DISCOVERINDEX] == true {
+                        clear_around(&mut board, number - 1, letter, &cell_mines);
 
-                if board[number - 1][letter][DISCOVERINDEX] == true {
-                    clear_around(&mut board, number - 1, letter);
+                        for v_offset in -1..2 {
+                            for h_offset in -1..2 {
+                                let new_row = (number - 1) as isize + v_offset;
+                                let new_col = letter as isize + h_offset;
 
-                    for v_offset in -1..2 {
-                        for h_offset in -1..2 {
-                            let new_row = (number - 1) as isize + v_offset;
-                            let new_col = letter as isize + h_offset;
-
-                            if new_row >= 0 && new_row < HEIGHT as isize && 
-                            new_col >= 0 && new_col < WIDTH as isize {
-                                read_board(&mut board, new_row as usize, new_col as usize, &mut cell_mines);
+                                if new_row >= 0 && new_row < HEIGHT as isize && 
+                                new_col >= 0 && new_col < WIDTH as isize {
+                                    read_board(&mut board, new_row as usize, new_col as usize, &mut cell_mines, &unflagged_mines);
+                                }
                             }
                         }
+                    } else {
+                        board[number - 1][letter][DISCOVERINDEX] = true;
+                        read_board(&mut board, number - 1, letter, &mut cell_mines, &unflagged_mines);
                     }
-                } else {
-                    board[number - 1][letter][DISCOVERINDEX] = true;
-                    read_board(&mut board, number - 1, letter, &mut cell_mines);
                 }
-            }
 
-            "f" => {
-                println!("which cell do you want to flag?");
+                "f" | "F" => {
+                    println!("which cell do you want to flag?");
 
-                let (number, letter) = capture_user_input();
+                    let (number, letter) = capture_user_input();
 
-                if board[number -1][letter][DISCOVERINDEX] == false {
-                    board[number - 1][letter][FLAGINDEX] = !board[number - 1][letter][FLAGINDEX];
+                    if board[number -1][letter][DISCOVERINDEX] == false {
+                        if board[number - 1][letter][FLAGINDEX] == false {
+                            unflagged_mines -= 1;
+                        } else {
+                            unflagged_mines += 1;
+                        }
+                        board[number - 1][letter][FLAGINDEX] = !board[number - 1][letter][FLAGINDEX];
+                    }
                 }
-            }
 
-            "q" => process::exit(0),
-            _ => continue,
+                "r" | "R" => continue 'outer,
+                "q" | "Q" => process::exit(0),
+                _ => continue,
+            }
         }
     }
 }
 
 
-fn render_board(board: &[[[bool; 3]; WIDTH]; HEIGHT], cell_mines: & HashMap<String, u32>) {
+fn render_board(board: &[[[bool; 3]; WIDTH]; HEIGHT], cell_mines: &HashMap<String, u32>, unflagged_mines: &i32) {
     let mut buffer = vec![String::new(); WIDTH];
     print!("  ");
 
@@ -98,7 +105,7 @@ fn render_board(board: &[[[bool; 3]; WIDTH]; HEIGHT], cell_mines: & HashMap<Stri
 
                     true => match board[row][collumn][MINEINDEX] {
                         false => { 
-                            match cell_mines.get(&String::from(format!("board[{row}][{collumn}]"))) {
+                            match cell_mines.get(&format!("board[{row}][{collumn}]")) {
                                 Some(&display_number) => buffer[collumn] = display_number.to_string(),
                                 _ => process::exit(1),
                             }
@@ -110,6 +117,7 @@ fn render_board(board: &[[[bool; 3]; WIDTH]; HEIGHT], cell_mines: & HashMap<Stri
         }
         println!("{:?}", &buffer);
     }
+    println!("mines left: {unflagged_mines}");
 }
 
 
@@ -152,7 +160,9 @@ fn generate_board() -> [[[bool; 3]; WIDTH]; HEIGHT] {
 }
 
 
-fn clear_around(board: &mut [[[bool; 3]; WIDTH]; HEIGHT], row: usize, collumn: usize) {
+fn clear_around(board: &mut [[[bool; 3]; WIDTH]; HEIGHT], row: usize, collumn: usize, cell_mines: &HashMap<String, u32>) {
+    let mut flagged_cells: u32 = 0;
+    
     for v_offset in -1..2 {
         for h_offset in -1..2 {
             let new_row = row as isize + v_offset;
@@ -160,9 +170,25 @@ fn clear_around(board: &mut [[[bool; 3]; WIDTH]; HEIGHT], row: usize, collumn: u
 
             if new_row >= 0 && new_row < HEIGHT as isize && 
             new_col >= 0 && new_col < WIDTH as isize {
+                if board[new_row as usize][new_col as usize][FLAGINDEX] == true {
+                    flagged_cells += 1;
+                }
+            }
+        }
+    }
+    if flagged_cells == *cell_mines.get(&format!("board[{row}][{collumn}]"))
+    .expect("failed to parse") {
 
-                if board[new_row as usize][new_col as usize][FLAGINDEX] == false {
-                    board[new_row as usize][new_col as usize][DISCOVERINDEX] = true;
+        for v_offset in -1..2 {
+            for h_offset in -1..2 {
+                let new_row = row as isize + v_offset;
+                let new_col = collumn as isize + h_offset;
+
+                if new_row >= 0 && new_row < HEIGHT as isize && 
+                new_col >= 0 && new_col < WIDTH as isize {
+                    if board[new_row as usize][new_col as usize][FLAGINDEX] == false {
+                        board[new_row as usize][new_col as usize][DISCOVERINDEX] = true;
+                    }
                 }
             }
         }
@@ -193,25 +219,48 @@ fn capture_user_input() -> (usize, usize) {
 }
 
 
-fn read_board(board: &mut [[[bool; 3]; WIDTH]; HEIGHT], row: usize, collumn: usize, cell_mines: &mut HashMap<String, u32>) {
+fn read_board(board: &mut [[[bool; 3]; WIDTH]; HEIGHT], row: usize, collumn: usize, cell_mines: &mut HashMap<String, u32>, unflagged_mines: &i32) {
     if board[row][collumn][MINEINDEX] == true && 
     board[row][collumn][DISCOVERINDEX] == true {
-        render_board(board, cell_mines);
+        render_board(board, cell_mines, unflagged_mines);
         println!("you stepped on a mine! you lost!");
         process::exit(0);
+
     } else {
         let near_mines = near_mines(board, row, collumn);
-        cell_mines.insert(String::from(format!("board[{row}][{collumn}]")), near_mines);
+
+        cell_mines.insert(format!("board[{row}][{collumn}]"), near_mines);
 
         if near_mines == 0 {
             clear_zeroes(board, row, collumn, cell_mines);
         }
     }
+    if check_win(board) == true {
+        render_board(board, cell_mines, unflagged_mines);
+        println!("you cleared the field! you won!");
+        process::exit(0);
+    }
+}
+
+
+fn check_win(board: &[[[bool; 3]; WIDTH]; HEIGHT]) -> bool {
+    let mut counter: u32 = 0;
+
+    for row in 0..HEIGHT {
+        for collumn in 0..WIDTH {
+            if board[row][collumn][MINEINDEX] == false {
+                if board[row][collumn][DISCOVERINDEX] == true {
+                    counter += 1;
+                }
+            }
+        }
+    }
+    return counter as usize == HEIGHT * WIDTH - MINES;
 }
 
 
 fn clear_zeroes(board: &mut [[[bool; 3]; WIDTH]; HEIGHT], row: usize, collumn: usize, cell_mines: &mut HashMap<String, u32>) {
-    clear_around(board, row, collumn);
+    clear_around(board, row, collumn, cell_mines);
 
     for v_offset in -1..2 {
         for h_offset in -1..2 {
@@ -220,9 +269,9 @@ fn clear_zeroes(board: &mut [[[bool; 3]; WIDTH]; HEIGHT], row: usize, collumn: u
 
             if new_row >= 0 && new_row < HEIGHT as isize && 
             new_col >= 0 && new_col < WIDTH as isize {
-                if !cell_mines.contains_key(&String::from(format!("board[{new_row}][{new_col}]"))) {
+                if !cell_mines.contains_key(&format!("board[{new_row}][{new_col}]")) {
                     let near_mines = near_mines(board, new_row as usize, new_col as usize);
-                    cell_mines.insert(String::from(format!("board[{new_row}][{new_col}]")), near_mines);
+                    cell_mines.insert(format!("board[{new_row}][{new_col}]"), near_mines);
 
                     if near_mines == 0 {
                         clear_zeroes(board, new_row as usize, new_col as usize, cell_mines);
